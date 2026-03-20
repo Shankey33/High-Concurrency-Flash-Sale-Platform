@@ -26,7 +26,7 @@ public class Purchase {
             OrderEventDTO orderEventDTO = new OrderEventDTO(orderId, productId, "PENDING");
             kafkaTemplate.send("sale-orders", orderId, orderEventDTO);
 
-            return "Order Placed! Order Id: " + orderId;
+            return "Order Accepted! In process. Order Id: " + orderId;
         } else {
             return "Sold Out";
         }

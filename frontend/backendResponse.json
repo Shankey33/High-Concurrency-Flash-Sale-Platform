@@ -1,0 +1,15 @@
+{
+  "testId": "123456789",
+  "users": 100,
+  "spawnRate": 5.0,
+  "durationMs": 20000,
+  "quantity": 1000,
+  "totalRequests": 1000,
+  "successCount": 1000,
+  "failureCount": 0,
+  "avgLatencyMs": 4,
+  "p95LatencyMs": 3,
+  "remainingStock": 0,
+  "oversellDetected": false,
+  "status": "PASSED"
+}
