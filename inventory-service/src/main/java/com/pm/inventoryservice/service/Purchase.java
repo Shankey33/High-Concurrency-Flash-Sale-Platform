@@ -1,6 +1,7 @@
 package com.pm.inventoryservice.service;
 
 import com.pm.common.dto.OrderEventDTO;
+import com.pm.common.dto.StockSetDTO;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.script.DefaultRedisScript;
@@ -37,8 +38,7 @@ public class Purchase {
                     "end";
 
 
-
-    public boolean purchaseItem(String productId){
+    public boolean purchaseItem(String productId) {
 
         String key = "stock:" + productId;
 
@@ -47,10 +47,10 @@ public class Purchase {
                 Collections.singletonList(key)
         );
 
-        if(result != null && result >= 0){
+        if (result != null && result >= 0) {
 
             String orderId = UUID.randomUUID().toString();
-            OrderEventDTO orderEventDTO =  new OrderEventDTO(orderId, productId, "PENDING");
+            OrderEventDTO orderEventDTO = new OrderEventDTO(orderId, productId, "PENDING");
 
             kafkaTemplate.send("sale-orders", orderId, orderEventDTO);
 
@@ -61,7 +61,7 @@ public class Purchase {
     }
 
     @KafkaListener(topics = "stock-revert", groupId = "inventory-group")
-    public void revertStock(String productId){
+    public void revertStock(String productId) {
 
         log.info("Revert request for stock received for product: " + productId);
 
@@ -71,5 +71,26 @@ public class Purchase {
         redisTemplate.opsForValue().increment(key);
 
         log.info("Reverted stock!");
+    }
+
+    public boolean setStock(StockSetDTO dto){
+
+        int quantity = dto.getQuantity();
+        String key = "stock:" + dto.getProductId();
+
+        if(quantity < 0){
+            log.error("Stock quantity should be positive!");
+            return false;
+        }
+        String value = String.valueOf(quantity);
+
+        try{
+            redisTemplate.opsForValue().set(key, value);
+        } catch (Exception e) {
+            log.error("Error occured while trying to set quantity: " + e.getMessage());
+            return false;
+        }
+
+        return true;
     }
 }
