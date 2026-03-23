@@ -9,9 +9,6 @@ import lombok.Setter;
 @NoArgsConstructor
 @Getter @Setter
 public class StockSetDTO {
-    @NotBlank
-    private String productId;
-
     @Min(0)
     private int quantity;
 }

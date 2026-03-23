@@ -17,7 +17,6 @@ import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 
@@ -36,106 +35,92 @@ public class RunTestAsync {
     private String productId;
 
     @Async("loadTestExecutor")
-    public void runTest(String testId){
-
+    public void runTest(String testId) {
         List<Long> latencies = Collections.synchronizedList(new ArrayList<>());
         Optional<Test> testModel = loadTestRepository.findById(testId);
 
-        if(!testModel.isPresent()) {
+        if (testModel.isEmpty()) {
             log.warn("Test not found when trying to fetch in RunTestAsync service!");
             return;
-        };
+        }
 
         Test test = testModel.get();
-
         int users = test.getUsers();
-        int poolSize = Math.min(users, 50);
         double spawnRate = test.getSpawnRate();
-        long delayMs = spawnRate > 0 ? (long)(1000 / spawnRate) : 0;
+        long delayMs = spawnRate > 0 ? (long) (1000 / spawnRate) : 0;
         String url = baseUrl + productId;
-
-        ExecutorService executor = Executors.newFixedThreadPool(poolSize);
 
         AtomicInteger success = new AtomicInteger(0);
         AtomicInteger failure = new AtomicInteger(0);
         AtomicLong totalLatency = new AtomicLong(0);
-        log.warn(url);
 
-        for(int i = 0; i < users; i++){
-            executor.submit(() -> {
-                long endTime = System.currentTimeMillis() + test.getDurationMs();
+        log.info("Starting Load Test with Virtual Threads. Target URL: {}", url);
 
-                while (System.currentTimeMillis() < endTime) {
-                    long start = System.currentTimeMillis();
-                    try {
-                        BuyRequestDTO request = new BuyRequestDTO();
+        try (ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor()) {
 
-                        ResponseEntity<String> response = restTemplate.postForEntity(url, request, String.class);
+            for (int i = 0; i < users; i++) {
+                executor.submit(() -> {
+                    long endTime = System.currentTimeMillis() + test.getDurationMs();
+
+                    while (System.currentTimeMillis() < endTime) {
+                        long start = System.currentTimeMillis();
+                        try {
+                            BuyRequestDTO request = new BuyRequestDTO();
+
+                            ResponseEntity<String> response = restTemplate.postForEntity(url, request, String.class);
+
+                            if (response.getStatusCode().is2xxSuccessful()) {
+                                success.incrementAndGet();
+                                break;
+                            } else {
+                                failure.incrementAndGet();
+                            }
 
 
-                        if (response.getStatusCode().is2xxSuccessful()) {
+                            Thread.sleep((long) (Math.random() * 10) + 1);
 
-                            success.incrementAndGet();
-                        } else {
+                        } catch (Exception e) {
+                            log.error("Request failed: {}", e.getMessage());
                             failure.incrementAndGet();
+                        } finally {
+                            long latency = System.currentTimeMillis() - start;
+                            latencies.add(latency);
+                            totalLatency.addAndGet(latency);
                         }
-
-                        long jitter = (long) (Math.random() * 5) + 1;
-                        Thread.sleep(jitter);
-
-                    } catch (Exception e) {
-                        log.error("Error simulating a req: " + e.getMessage());
-                        failure.incrementAndGet();
-                    } finally{
-                        long latency = System.currentTimeMillis() - start;
-                        latencies.add(latency);
-                        totalLatency.addAndGet(latency);
                     }
-                }
-            });
+                });
 
-            try{
-                Thread.sleep(delayMs);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
+                try {
+                    Thread.sleep(delayMs);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
             }
         }
 
-        executor.shutdown();
-
-        try{
-            executor.awaitTermination(test.getDurationMs() + 5000, TimeUnit.MILLISECONDS);
-        } catch (Exception e) {
-            Thread.currentThread().interrupt();
-        }
-
-        long totalReq = success.get() + failure.get();
-        long avgLatency = totalReq == 0 ? 0 : totalLatency.get()/totalReq;
+        int totalReq = success.get() + failure.get();
+        long avgLatency = totalReq == 0 ? 0 : totalLatency.get() / totalReq;
 
         Collections.sort(latencies);
-        int index = (int) (0.95 * latencies.size());
-        long p95 = latencies.isEmpty() ? 0 : latencies.get(index);
+        long p95 = 0;
+        if (!latencies.isEmpty()) {
+            int index = (int) (0.95 * latencies.size());
+            p95 = latencies.get(Math.min(index, latencies.size() - 1));
+        }
 
         boolean overSell = success.get() > test.getQuantity();
         int remaining = Math.max(0, test.getQuantity() - success.get());
 
-        test.setTotalRequests(success.get() + failure.get());
+        test.setTotalRequests(totalReq);
         test.setSuccessCount(success.get());
         test.setFailureCount(failure.get());
         test.setAvgLatencyMs(avgLatency);
         test.setP95LatencyMs(p95);
         test.setRemainingStock(remaining);
         test.setOversellDetected(overSell);
-
-        if (overSell) {
-            test.setStatus(Test.FinalStatus.FAILED);
-        } else {
-            test.setStatus(Test.FinalStatus.PASSED);
-        }
+        test.setStatus(overSell ? Test.FinalStatus.FAILED : Test.FinalStatus.PASSED);
 
         loadTestRepository.save(test);
-
-        log.info("Stock={}, Success={}, Oversell={}", test.getQuantity(), success.get(), overSell);
-
+        log.info("Test Finished!: Success={}, Failures={}, Oversell={}", success.get(), failure.get(), overSell);
     }
 }

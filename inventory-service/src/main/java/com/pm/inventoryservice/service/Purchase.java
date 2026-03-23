@@ -74,8 +74,8 @@ public class Purchase {
 
     public boolean setStock(StockSetDTO dto){
 
-        int quantity = dto.getQuantity();
-        String key = "stock:" + dto.getProductId();
+        int quantity = dto.getQuantity();;
+        String key = "stock:101";
 
         if(quantity < 0){
             log.error("Stock quantity should be positive!");
